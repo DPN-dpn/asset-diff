@@ -5,8 +5,21 @@ SCRIPT_TEMPLATE = '''import os
 import struct
 import glob
 import re
+import shutil
 
 DIFF_DATA = {diff_data}
+
+BACKED_UP = set()
+
+def backup_file(filepath):
+    abs_path = os.path.abspath(filepath)
+    if abs_path in BACKED_UP:
+        return
+    backup_path = filepath + ".bak"
+    if not os.path.exists(backup_path):
+        shutil.copy2(filepath, backup_path)
+        print(f"[*] 백업 생성됨: {backup_path}")
+    BACKED_UP.add(abs_path)
 
 def get_hash(section_content):
     match = re.search(r"\\bhash\\s*=\\s*([0-9a-fA-F]+)", section_content)
@@ -22,6 +35,7 @@ def process_buf_file(filepath, mapping):
         return
         
     print(f"[+] 버퍼 수정 중: {filepath}")
+    backup_file(filepath)
     with open(filepath, 'r+b') as f:
         data = bytearray(f.read())
         stride = 32
@@ -113,6 +127,7 @@ def main():
                         process_buf_file(buf_filename, mapping)
         
         # 수정된 ini 저장
+        backup_file(ini_file)
         with open(ini_file, 'w', encoding='utf-8') as f:
             f.write("".join(sections))
         print(f"[+] {ini_file} 저장 완료!")
