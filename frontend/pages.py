@@ -231,6 +231,7 @@ class ScriptPage(ttk.Frame):
             if key not in self.loaded_data:
                 self.loaded_data[key] = val
                 self.tree.insert("", tk.END, iid=key, text=key)
+                self.tree.selection_add(key)
                 added += 1
         self.context.logger.log(f"총 {added}개의 에셋 diff가 목록에 추가되었습니다.")
 
