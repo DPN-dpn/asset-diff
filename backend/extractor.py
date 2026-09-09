@@ -168,9 +168,8 @@ def extract_hash_diff(old_dir, new_dir):
                                     for o_item, n_item in zip(old_sorted, new_sorted):
                                         o_idx = o_item[1]
                                         n_idx = n_item[1]
-                                        if o_idx != 0:
-                                            pair = (o_idx, n_idx)
-                                            mapping_freq[pair] = mapping_freq.get(pair, 0) + 1
+                                        pair = (o_idx, n_idx)
+                                        mapping_freq[pair] = mapping_freq.get(pair, 0) + 1
 
             if mapping_freq:
                 final_mapping = {}
