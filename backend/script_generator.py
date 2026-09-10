@@ -55,8 +55,11 @@ def process_buf_file(filepath, mapping):
 
 def main():
     print("=== 모드 자동 업데이트 시작 ===")
-    ini_files = glob.glob("*.ini")
-    ini_files = [f for f in ini_files if not os.path.basename(f).lower().startswith("disabled")]
+    ini_files = []
+    for root, dirs, files in os.walk("."):
+        for f in files:
+            if f.endswith(".ini") and not f.lower().startswith("disabled"):
+                ini_files.append(os.path.join(root, f))
     
     if not ini_files:
         print("[-] 현재 폴더에 .ini 파일이 없습니다.")
