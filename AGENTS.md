@@ -18,9 +18,9 @@ asset-diff/
 ├── app.py                  # 엔트리 포인트, AppContext 초기화
 ├── run.bat                 # 실행 배치 파일
 ├── backend/
-│   ├── extractor.py        # 핵심 diff 추출 로직
+│   ├── extractor.py        # 핵심 diff 추출 로직 (LAYOUT_CHANGES 포함)
 │   ├── scanner.py          # 에셋 폴더 스캐너
-│   ├── script_generator.py # 픽스툴(auto_update_mod.py) 코드 생성기
+│   ├── script_generator.py # 픽스툴(auto_update_mod.py) 코드 생성기 (자동 버퍼 변환 탑재)
 │   └── logger.py           # 로거 (콜백 기반)
 ├── frontend/
 │   ├── main_window.py      # 메인 윈도우 (툴바 + 페이지 컨테이너)
@@ -96,6 +96,8 @@ extract_hash_diff(old_dir, new_dir) -> dict
   "HASH_MAPPING":         {},
   "INDEX_CHANGES":        {},
   "VERTEX_GROUP_MAPPING": {},
+  "STRIDE_CHANGES":       {},
+  "LAYOUT_CHANGES":       {},
   "WARNINGS":             []
 }
 ```
@@ -137,9 +139,10 @@ generate_script(diff_data, output_path)
 |------|----------|
 | 1. 해시 글로벌 치환 | `.ini` 파일 전체에서 `HASH_MAPPING`의 구해시를 정규식으로 신해시로 치환 |
 | 2. 인덱스 치환 | `INDEX_CHANGES`의 new_ib_hash를 가진 섹션을 찾아 `match_first_index`, `match_index_count` 값 교체 |
-| 3. Blend 버퍼 수정 | `VERTEX_GROUP_MAPPING`의 new_blend_hash를 참조하는 `.buf` 파일을 바이너리로 열어 stride=32 기준으로 오프셋 16/20/24/28 바이트의 뼈대 인덱스를 직접 패치 |
-| 4. 백업 생성 | 수정 전 원본을 `.bak` 파일로 복사 (중복 방지) |
-| 5. `.ini` 저장 | 수정된 내용을 다시 파일에 쓰기 |
+| 3. Blend 버퍼 수정 | `VERTEX_GROUP_MAPPING`의 new_blend_hash를 참조하는 `.buf` 파일을 바이너리로 열어 뼈대 인덱스를 직접 패치 |
+| 4. 제네릭 버퍼 구조 변환 | `LAYOUT_CHANGES`를 기반으로 `POSITION`, `COLOR`, `TEXCOORD` 등의 요소(Semantic)별 포맷 변환(예: 8bit UNORM -> 32bit FLOAT)을 `struct`를 사용해 자동으로 바이트 단위 재조립 |
+| 5. 백업 생성 | 수정 전 원본을 `.bak` 파일로 복사 (중복 방지) |
+| 6. `.ini` 저장 | 갱신된 `stride` 값 등 수정된 내용을 다시 파일에 쓰기 |
 
 ---
 
@@ -165,8 +168,9 @@ MainWindow (900x700)
 │   │   ├── [버튼] diff 추출   → DiffPage로 전환
 │   │   └── [버튼] 픽스툴 작성 → ScriptPage로 전환
 │   └── page_container (우측, grid 스택)
-│       ├── DiffPage   (z-order로 겹쳐서 tkraise()로 전환)
-│       └── ScriptPage
+│       ├── DiffPage     (에셋 기반 Diff 추출)
+│       ├── ModDiffPage  (현재 수동 매칭 기능으로 재설계 대기 중)
+│       └── ScriptPage   (픽스툴 작성)
 └── bottom_pane (height=150)
     └── log_text (Consolas, 다크 테마 로그 패널)
 ```
@@ -205,4 +209,5 @@ generate_script(selected_diff_data)
 
 ## 확장 포인트 / 미구현 기능
 
+- **모드 수동 매칭 (Mod Diff 개편)**: 자동으로 INI 섹션 이름을 파싱하던 불안정한 기존 기능을 폐기하고, 사용자가 수동으로 해시값을 짝지어 단일 `diff.json`을 내보내는 방향으로 UI 기획 중.
 - `AppContext.old_dir` / `new_dir` 경로가 하드코딩(`"old asset"`, `"new asset"`)되어 있어, 향후 사용자 지정 경로 설정 기능 추가 가능.

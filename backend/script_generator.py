@@ -172,7 +172,7 @@ def main():
         return
         
     for ini_file in ini_files:
-        print(f"\\n[+] 분석 중: {ini_file}")
+        print(f"[+] 분석 중: {ini_file}")
         with open(ini_file, 'r', encoding='utf-8') as f:
             original_content = f.read()
         
@@ -248,7 +248,7 @@ def main():
         else:
             print(f"[-] {ini_file} 변경 사항 없음.")
         
-    print("\\n=== 업데이트 완료! ===")
+    print("=== 업데이트 완료! ===")
     os.system("pause")
 
 if __name__ == "__main__":
