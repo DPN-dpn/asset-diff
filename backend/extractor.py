@@ -90,6 +90,7 @@ def extract_hash_diff(old_dir, new_dir):
         "HASH_MAPPING": {},
         "INDEX_CHANGES": {},
         "VERTEX_GROUP_MAPPING": {},
+        "STRIDE_CHANGES": {},
         "WARNINGS": []
     }
 
@@ -142,6 +143,24 @@ def extract_hash_diff(old_dir, new_dir):
         new_vb0_files = glob.glob(os.path.join(new_dir, f"*{comp_name}*-vb0=*.txt"))
         
         if old_vb0_files and new_vb0_files:
+            # Stride 변화 감지
+            import re
+            old_stride = None
+            new_stride = None
+            
+            with open(old_vb0_files[0], 'r', encoding='utf-8') as f:
+                first_line = f.readline().strip()
+                if first_line.startswith("stride:"):
+                    old_stride = int(first_line.split(":")[1].strip())
+                    
+            with open(new_vb0_files[0], 'r', encoding='utf-8') as f:
+                first_line = f.readline().strip()
+                if first_line.startswith("stride:"):
+                    new_stride = int(first_line.split(":")[1].strip())
+                    
+            if old_stride is not None and new_stride is not None and old_stride != new_stride:
+                diff_result["STRIDE_CHANGES"][comp_name] = f"{old_stride} -> {new_stride}"
+                
             mapping_freq = {}
             for old_f in old_vb0_files:
                 section_name = os.path.basename(old_f).split('-vb0')[0]

@@ -9,9 +9,10 @@ class AppContext:
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.old_dir = os.path.join(self.base_dir, "old asset")
         self.new_dir = os.path.join(self.base_dir, "new asset")
+        self.old_mod_dir = os.path.join(self.base_dir, "old mod")
         self.output_dir = os.path.join(self.base_dir, "output")
         
-        for d in [self.old_dir, self.new_dir, self.output_dir]:
+        for d in [self.old_dir, self.new_dir, self.old_mod_dir, self.output_dir]:
             os.makedirs(d, exist_ok=True)
 
 def main():

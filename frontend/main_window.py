@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
-from frontend.pages import DiffPage, ScriptPage
+from frontend.pages import DiffPage, ScriptPage, ModDiffPage
 
 class MainWindow(tk.Tk):
     def __init__(self, app_context):
@@ -44,6 +44,7 @@ class MainWindow(tk.Tk):
         self.pages = {}
         
         self.pages["diff추출"] = DiffPage(self.page_container, self.app_context)
+        self.pages["모드diff"] = ModDiffPage(self.page_container, self.app_context)
         self.pages["픽스툴작성"] = ScriptPage(self.page_container, self.app_context)
         
         for frame in self.pages.values():
@@ -53,8 +54,11 @@ class MainWindow(tk.Tk):
         style = ttk.Style()
         style.configure("Toolbar.TButton", font=("", 11, "bold"), padding=10)
         
-        btn_diff = ttk.Button(self.toolbar_frame, text="diff 추출", style="Toolbar.TButton", command=lambda: self.show_page("diff추출"))
+        btn_diff = ttk.Button(self.toolbar_frame, text="에셋 diff", style="Toolbar.TButton", command=lambda: self.show_page("diff추출"))
         btn_diff.pack(fill=tk.X, pady=5)
+        
+        btn_mod_diff = ttk.Button(self.toolbar_frame, text="모드 diff", style="Toolbar.TButton", command=lambda: self.show_page("모드diff"))
+        btn_mod_diff.pack(fill=tk.X, pady=5)
         
         btn_script = ttk.Button(self.toolbar_frame, text="픽스툴 작성", style="Toolbar.TButton", command=lambda: self.show_page("픽스툴작성"))
         btn_script.pack(fill=tk.X, pady=5)
