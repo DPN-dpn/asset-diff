@@ -354,11 +354,9 @@ class ScriptPage(ttk.Frame):
         self.tree.bind("<Button-1>", self.on_tree_click)
         
         scroll_y = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
-        scroll_x = ttk.Scrollbar(list_frame, orient="horizontal", command=self.tree.xview)
         
-        self.tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        self.tree.configure(yscrollcommand=scroll_y.set)
         
-        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
         scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
