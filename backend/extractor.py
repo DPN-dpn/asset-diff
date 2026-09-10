@@ -1,6 +1,57 @@
 import os
 import json
 import glob
+import re
+
+FORMAT_INFO = {
+    "R32G32B32A32_FLOAT": {"size": 16, "struct": "4f", "type": "float"},
+    "R32G32B32_FLOAT": {"size": 12, "struct": "3f", "type": "float"},
+    "R32G32_FLOAT": {"size": 8, "struct": "2f", "type": "float"},
+    "R32_FLOAT": {"size": 4, "struct": "1f", "type": "float"},
+    "R32_UINT": {"size": 4, "struct": "1I", "type": "uint"},
+    "R32G32B32A32_UINT": {"size": 16, "struct": "4I", "type": "uint"},
+    "R8G8B8A8_UNORM": {"size": 4, "struct": "4B", "type": "unorm"},
+    "R16G16_FLOAT": {"size": 4, "struct": "2e", "type": "float"},
+    "R16G16B16A16_FLOAT": {"size": 8, "struct": "4e", "type": "float"}
+}
+
+def parse_vb_layout(filepath):
+    """
+    vb0.txt 파일의 상단을 읽어 정점의 레이아웃(시맨틱)을 분석합니다.
+    """
+    elements = []
+    if not os.path.exists(filepath):
+        return elements
+        
+    with open(filepath, 'r', encoding='utf-8') as f:
+        current_elem = {}
+        for line in f:
+            line = line.strip()
+            if line.startswith('vb0['): break
+            
+            if line.startswith('element['):
+                if current_elem:
+                    elements.append(current_elem)
+                current_elem = {}
+            elif ':' in line and current_elem is not None:
+                parts = line.split(':', 1)
+                key = parts[0].strip()
+                val = parts[1].strip()
+                if key == 'SemanticName':
+                    current_elem['semantic'] = val
+                elif key == 'SemanticIndex':
+                    current_elem['index'] = int(val)
+                elif key == 'Format':
+                    current_elem['format'] = val
+                    if val in FORMAT_INFO:
+                        current_elem['size'] = FORMAT_INFO[val]['size']
+                elif key == 'AlignedByteOffset':
+                    current_elem['offset'] = int(val)
+                    
+        if current_elem:
+            elements.append(current_elem)
+            
+    return elements
 
 def load_hash_json(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
@@ -91,6 +142,7 @@ def extract_hash_diff(old_dir, new_dir):
         "INDEX_CHANGES": {},
         "VERTEX_GROUP_MAPPING": {},
         "STRIDE_CHANGES": {},
+        "LAYOUT_CHANGES": {},
         "WARNINGS": []
     }
 
@@ -160,6 +212,55 @@ def extract_hash_diff(old_dir, new_dir):
                     
             if old_stride is not None and new_stride is not None and old_stride != new_stride:
                 diff_result["STRIDE_CHANGES"][comp_name] = f"{old_stride} -> {new_stride}"
+                
+                # Layout 변화 상세 감지
+                old_layout = parse_vb_layout(old_vb0_files[0])
+                new_layout = parse_vb_layout(new_vb0_files[0])
+                
+                old_hash_str = old_vb0_files[0].split('=')[-1].split('.')[0] if '=' in old_vb0_files[0] else ""
+                new_hash_str = new_vb0_files[0].split('=')[-1].split('.')[0] if '=' in new_vb0_files[0] else ""
+                
+                layout_diff = {
+                    "old_hash": old_hash_str,
+                    "new_hash": new_hash_str,
+                    "old_stride": old_stride,
+                    "new_stride": new_stride,
+                    "changes": [],
+                    "added": [],
+                    "removed": []
+                }
+                
+                # 이름(SemanticName + Index) 기준으로 매핑하여 비교
+                old_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in old_layout}
+                new_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in new_layout}
+                
+                for key, old_e in old_dict_layout.items():
+                    if key in new_dict_layout:
+                        new_e = new_dict_layout[key]
+                        if old_e.get('format') != new_e.get('format'):
+                            layout_diff['changes'].append({
+                                "semantic": old_e.get('semantic'),
+                                "index": old_e.get('index', 0),
+                                "old_format": old_e.get('format'),
+                                "new_format": new_e.get('format'),
+                                "old_offset": old_e.get('offset'),
+                                "new_offset": new_e.get('offset'),
+                                "old_size": old_e.get('size'),
+                                "new_size": new_e.get('size'),
+                                "old_type": FORMAT_INFO.get(old_e.get('format'), {}).get('type'),
+                                "new_type": FORMAT_INFO.get(new_e.get('format'), {}).get('type'),
+                                "old_struct": FORMAT_INFO.get(old_e.get('format'), {}).get('struct'),
+                                "new_struct": FORMAT_INFO.get(new_e.get('format'), {}).get('struct')
+                            })
+                    else:
+                        layout_diff['removed'].append(old_e)
+                        
+                for key, new_e in new_dict_layout.items():
+                    if key not in old_dict_layout:
+                        layout_diff['added'].append(new_e)
+                        
+                if layout_diff['changes'] or layout_diff['added'] or layout_diff['removed']:
+                    diff_result["LAYOUT_CHANGES"][comp_name] = layout_diff
                 
             mapping_freq = {}
             for old_f in old_vb0_files:

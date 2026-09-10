@@ -73,7 +73,9 @@ class MainWindow(tk.Tk):
         self.app_context.logger.log(f"페이지 이동: {page_name}")
 
     def write_log(self, text):
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, text)
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
+        def _update():
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.insert(tk.END, text)
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
+        self.after(0, _update)

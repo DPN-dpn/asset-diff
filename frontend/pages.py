@@ -109,10 +109,15 @@ class DiffPage(ttk.Frame):
                 break
 
     def execute_extraction(self):
+        import threading
+        thread = threading.Thread(target=self._execute_extraction_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _execute_extraction_thread(self):
         if not self.pair_rows:
             self.context.logger.log("[경고] 비교할 짝이 캔버스에 하나도 없습니다.")
             return
-            
         if not os.path.exists(self.context.output_dir):
             os.makedirs(self.context.output_dir)
             
@@ -254,6 +259,12 @@ class ModDiffPage(ttk.Frame):
                 break
 
     def execute_extraction(self):
+        import threading
+        thread = threading.Thread(target=self._execute_extraction_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _execute_extraction_thread(self):
         if not self.pair_rows:
             self.context.logger.log("[경고] 비교할 짝이 없습니다.")
             return
@@ -372,11 +383,21 @@ class ScriptPage(ttk.Frame):
         for key, val in data.items():
             if key not in self.loaded_data:
                 self.loaded_data[key] = val
-                
                 display_text = key
                 if val.get("STRIDE_CHANGES"):
-                    display_text += " (⚠️ 규격 변경됨)"
+                    is_fixable = True
+                    layout_dict = val.get("LAYOUT_CHANGES", {})
+                    if not layout_dict:
+                        is_fixable = False
+                    else:
+                        for comp_name, layout in layout_dict.items():
+                            if layout.get("added") or layout.get("removed") or not layout.get("changes"):
+                                is_fixable = False
+                                break
                     
+                    if not is_fixable:
+                        display_text += " (⚠️ 수동 업데이트 필요)"
+                        
                 self.tree.insert("", tk.END, iid=key, text=display_text)
                 self.tree.selection_add(key)
                 added += 1
@@ -457,6 +478,12 @@ class ScriptPage(ttk.Frame):
         self.context.logger.log("목록이 초기화되었습니다.")
 
     def generate_tool(self):
+        import threading
+        thread = threading.Thread(target=self._generate_tool_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _generate_tool_thread(self):
         selected = self.tree.selection()
         if not selected:
             self.context.logger.log("[경고] 픽스툴에 포함할 항목을 선택해주세요.")
@@ -464,9 +491,25 @@ class ScriptPage(ttk.Frame):
             
         final_data = {key: self.loaded_data[key] for key in selected}
         
-        # Stride 변경 경고 팝업
-        has_stride_changes = any(val.get("STRIDE_CHANGES") for val in final_data.values())
-        if has_stride_changes:
+        # Stride 변경 경고 팝업 (자동 변환이 불가능한 경우만)
+        has_unfixable_stride_changes = False
+        for val in final_data.values():
+            if val.get("STRIDE_CHANGES"):
+                is_fixable = True
+                layout_dict = val.get("LAYOUT_CHANGES", {})
+                if not layout_dict:
+                    is_fixable = False
+                else:
+                    for comp_name, layout in layout_dict.items():
+                        if layout.get("added") or layout.get("removed") or not layout.get("changes"):
+                            is_fixable = False
+                            break
+                
+                if not is_fixable:
+                    has_unfixable_stride_changes = True
+                    break
+                
+        if has_unfixable_stride_changes:
             import tkinter.messagebox as mb
             answer = mb.askyesno(
                 "경고", 
