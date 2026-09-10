@@ -1,9 +1,14 @@
-import os
 import json
+import os
 import tkinter as tk
+import tkinter.filedialog as fd
+import tkinter.simpledialog as sd
+import traceback
 from tkinter import ttk
-from backend.scanner import scan_assets
+
 from backend.extractor import extract_hash_diff
+from backend.scanner import scan_assets
+from backend.script_generator import generate_script
 
 class DiffPage(ttk.Frame):
     def __init__(self, parent, context):
@@ -154,18 +159,6 @@ class DiffPage(ttk.Frame):
                 
         except Exception as e:
             self.context.logger.log(f"[오류] 저장 실패: {e}")
-
-
-class MergePage(ttk.Frame):
-    def __init__(self, parent, context):
-        super().__init__(parent)
-        ttk.Label(self, text="diff 합치기 기능은 준비 중입니다.", font=("", 14)).pack(expand=True)
-
-
-import tkinter.filedialog as fd
-import tkinter.simpledialog as sd
-import traceback
-from backend.script_generator import generate_script
 
 class ScriptPage(ttk.Frame):
     def __init__(self, parent, context):
