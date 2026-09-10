@@ -169,9 +169,339 @@ class ModDiffPage(ttk.Frame):
     def __init__(self, parent, context):
         super().__init__(parent)
         self.context = context
+        self.asset_parts = []
+        self.ini_sections = {}
+        self.mapping_vars = {}
         
-        lbl = ttk.Label(self, text="새로운 모드 Diff 수동 매칭 UI 기획 대기 중...", font=("", 14, "bold"))
-        lbl.pack(expand=True)
+        self.text_rows = []
+        self.cb_rows = []
+        
+        self.build_ui()
+        
+    def build_ui(self):
+        # Top: Selection
+        top_frame = ttk.Frame(self)
+        top_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        btn_refresh = ttk.Button(top_frame, text="갱신", command=self.refresh_lists)
+        btn_refresh.pack(side=tk.LEFT, padx=5)
+        
+        self.cb_asset = ttk.Combobox(top_frame, state="readonly", width=30)
+        self.cb_asset.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cb_asset.set("신규 에셋 선택")
+        
+        self.cb_mod = ttk.Combobox(top_frame, state="readonly", width=30)
+        self.cb_mod.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.cb_mod.set("구버전 모드 선택")
+        
+        btn_load = ttk.Button(top_frame, text="불러오기", command=self.load_data)
+        btn_load.pack(side=tk.RIGHT, padx=5)
+
+        # Middle: Lists
+        paned = tk.PanedWindow(self, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+        
+        self.left_frame = ttk.LabelFrame(paned, text="신규 에셋 정보")
+        self.right_frame = ttk.LabelFrame(paned, text="구버전 모드 매핑")
+        paned.add(self.left_frame, minsize=200)
+        paned.add(self.right_frame, minsize=400)
+        
+        # Left Text
+        self.asset_text = tk.Text(self.left_frame, wrap="none", font=("Consolas", 9))
+        scroll_al = ttk.Scrollbar(self.left_frame, command=self.asset_text.yview)
+        self.asset_text.configure(yscrollcommand=scroll_al.set)
+        scroll_al.pack(side=tk.RIGHT, fill=tk.Y)
+        self.asset_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Right Frame - Search bar
+        search_frame = ttk.Frame(self.right_frame)
+        search_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(search_frame, text="검색:").pack(side=tk.LEFT)
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *args: self.filter_mod_list())
+        search_entry = ttk.Entry(search_frame, textvariable=self.search_var)
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Right Frame - Dual Canvas
+        canvas_container = ttk.Frame(self.right_frame)
+        canvas_container.pack(fill=tk.BOTH, expand=True)
+        
+        self.mod_text_canvas = tk.Canvas(canvas_container, highlightthickness=0, borderwidth=0)
+        self.mod_cb_canvas = tk.Canvas(canvas_container, highlightthickness=0, borderwidth=0, width=150)
+        
+        scroll_y = ttk.Scrollbar(canvas_container, orient="vertical")
+        scroll_x = ttk.Scrollbar(canvas_container, orient="horizontal", command=self.mod_text_canvas.xview)
+        
+        self.mod_text_canvas.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        self.mod_cb_canvas.configure(yscrollcommand=scroll_y.set)
+        
+        def sync_yview(*args):
+            self.mod_text_canvas.yview(*args)
+            self.mod_cb_canvas.yview(*args)
+        scroll_y.configure(command=sync_yview)
+        
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        self.mod_cb_canvas.pack(side=tk.RIGHT, fill=tk.Y)
+        self.mod_text_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        self.mod_text_frame = ttk.Frame(self.mod_text_canvas)
+        self.mod_cb_frame = ttk.Frame(self.mod_cb_canvas)
+        
+        self.mod_text_frame.bind("<Configure>", lambda e: self.mod_text_canvas.configure(scrollregion=self.mod_text_canvas.bbox("all")))
+        self.mod_cb_frame.bind("<Configure>", lambda e: self.mod_cb_canvas.configure(scrollregion=self.mod_cb_canvas.bbox("all")))
+        
+        self.mod_text_window = self.mod_text_canvas.create_window((0, 0), window=self.mod_text_frame, anchor="nw")
+        self.mod_cb_window = self.mod_cb_canvas.create_window((0, 0), window=self.mod_cb_frame, anchor="nw")
+        
+        def on_mousewheel(event):
+            try:
+                x, y = self.winfo_pointerxy()
+                rx, ry = self.right_frame.winfo_rootx(), self.right_frame.winfo_rooty()
+                rw, rh = self.right_frame.winfo_width(), self.right_frame.winfo_height()
+                if rx <= x <= rx+rw and ry <= y <= ry+rh:
+                    delta = int(-1*(event.delta/120))
+                    self.mod_text_canvas.yview_scroll(delta, "units")
+                    self.mod_cb_canvas.yview_scroll(delta, "units")
+                    return
+                ax, ay = self.left_frame.winfo_rootx(), self.left_frame.winfo_rooty()
+                aw, ah = self.left_frame.winfo_width(), self.left_frame.winfo_height()
+                if ax <= x <= ax+aw and ay <= y <= ay+ah:
+                    self.asset_text.yview_scroll(int(-1*(event.delta/120)), "units")
+            except:
+                pass
+                
+        self.bind_all("<MouseWheel>", on_mousewheel)
+        
+        # Bottom: Extract
+        action_frame = ttk.Frame(self)
+        action_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        btn_extract = ttk.Button(action_frame, text="모드 diff 추출", padding=10, command=self.execute_extraction)
+        btn_extract.pack(fill=tk.X)
+        
+    def refresh_lists(self):
+        from backend.scanner import scan_assets, scan_mods
+        assets = scan_assets(self.context.new_dir)
+        mods = scan_mods("old mod")
+        
+        self.cb_asset['values'] = assets
+        self.cb_mod['values'] = mods
+        self.context.logger.log("에셋 및 모드 목록이 갱신되었습니다.")
+        
+    def load_data(self):
+        import os, json, glob
+        from backend.ini_parser import parse_ini_for_diff
+        
+        asset_val = self.cb_asset.get()
+        mod_val = self.cb_mod.get()
+        
+        if not asset_val or asset_val.startswith("에셋"):
+            self.context.logger.log("[경고] 에셋을 먼저 선택하세요.")
+            return
+        if not mod_val or mod_val.startswith("모드"):
+            self.context.logger.log("[경고] 모드를 먼저 선택하세요.")
+            return
+            
+        # Load Asset info
+        asset_path = os.path.join(self.context.new_dir, asset_val)
+        hash_file = os.path.join(asset_path, "hash.json")
+        self.asset_parts = []
+        self.asset_text.delete("1.0", tk.END)
+        
+        if os.path.exists(hash_file):
+            with open(hash_file, 'r', encoding='utf-8') as f:
+                asset_data = json.load(f)
+            self.asset_part_details = {}
+            for comp in asset_data:
+                c_name = comp["component_name"]
+                self.asset_parts.append(c_name)
+                self.asset_text.insert(tk.END, f"[{c_name}]\n")
+                
+                details = []
+                for key in ["draw_vb", "position_vb", "blend_vb", "texcoord_vb", "ib"]:
+                    val = comp.get(key)
+                    if val:
+                        self.asset_text.insert(tk.END, f"  {key}: {val}\n")
+                        details.append(key)
+                        
+                texs = comp.get("texture_hashes")
+                if texs:
+                    for t in texs:
+                        if len(t) >= 1:
+                            details.append(t[0])
+                        if len(t) >= 3:
+                            self.asset_text.insert(tk.END, f"  {t[0]}: {t[2]}\n")
+                            
+                self.asset_part_details[c_name] = details
+                self.asset_text.insert(tk.END, "-"*30 + "\n")
+        else:
+            self.context.logger.log(f"[에러] {asset_val}에 hash.json이 없습니다.")
+            return
+            
+        # Load Mod info
+        mod_path = os.path.join("old mod", mod_val)
+        ini_files = []
+        for root, _, files in os.walk(mod_path):
+            for f in files:
+                if f.lower().endswith(".ini"):
+                    base_f = f.lower()
+                    if not base_f.startswith("desktop") and not base_f.startswith("disabled"):
+                        ini_files.append(os.path.join(root, f))
+        
+        self.mapping_vars.clear()
+        
+        if not ini_files:
+            self.context.logger.log(f"[에러] {mod_val}에 .ini 파일이 없습니다.")
+            return
+            
+        self.ini_sections = {}
+        for f in ini_files:
+            self.ini_sections.update(parse_ini_for_diff(f))
+            
+        self.filter_mod_list()
+        
+        self.context.logger.log("에셋 및 모드 데이터를 성공적으로 불러왔습니다.")
+
+    def filter_mod_list(self):
+        import tkinter as tk
+        from tkinter import ttk
+        
+        for widget in self.mod_text_frame.winfo_children(): widget.destroy()
+        for widget in self.mod_cb_frame.winfo_children(): widget.destroy()
+        
+        keyword = self.search_var.get().lower()
+        self.text_rows = []
+        self.cb_rows = []
+        
+        for sec_name, data in self.ini_sections.items():
+            content_str = f"[{sec_name}]\nhash = {data['hash']}\n{data['hints']}"
+            if keyword and keyword not in content_str.lower():
+                continue
+                
+            if self.text_rows:
+                ttk.Separator(self.mod_text_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+                ttk.Separator(self.mod_cb_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+                
+            t_row = ttk.Frame(self.mod_text_frame)
+            t_row.pack(fill=tk.X, pady=2, padx=2)
+            
+            lbl = tk.Label(t_row, text=content_str, justify=tk.LEFT, anchor="w", bg="#333333", fg="white")
+            lbl.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            c_row = ttk.Frame(self.mod_cb_frame)
+            c_row.pack(fill=tk.X, pady=2, padx=2)
+            
+            var_part = self.mapping_vars.get(f"{sec_name}_part")
+            var_type = self.mapping_vars.get(f"{sec_name}_type")
+            if not var_part:
+                var_part = tk.StringVar(self.mod_cb_frame, value="--")
+                var_part.set("--")
+                self.mapping_vars[f"{sec_name}_part"] = var_part
+            if not var_type:
+                var_type = tk.StringVar(self.mod_cb_frame, value="--")
+                var_type.set("--")
+                self.mapping_vars[f"{sec_name}_type"] = var_type
+                
+            cb_part = ttk.Combobox(c_row, textvariable=var_part, values=["--"] + self.asset_parts, state="readonly", width=15)
+            cb_part.pack(side=tk.TOP, pady=(0, 2), expand=True)
+            
+            cb_type = ttk.Combobox(c_row, textvariable=var_type, values=["--"], state="readonly", width=15)
+            
+            def on_part_change(event, vp=var_part, vt=var_type, ct=cb_type):
+                part = vp.get()
+                if part in self.asset_part_details:
+                    ct['values'] = ["--"] + self.asset_part_details[part]
+                    if not ct.winfo_manager():
+                        ct.pack(side=tk.TOP, expand=True)
+                else:
+                    ct['values'] = ["--"]
+                    if ct.winfo_manager():
+                        ct.pack_forget()
+                vt.set("--")
+            cb_part.bind("<<ComboboxSelected>>", on_part_change)
+            
+            if var_part.get() in self.asset_part_details:
+                cb_type['values'] = ["--"] + self.asset_part_details[var_part.get()]
+                cb_type.pack(side=tk.TOP, expand=True)
+            
+            def on_cb_scroll(event):
+                self.mod_text_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                self.mod_cb_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+                return "break"
+            cb_part.bind("<MouseWheel>", on_cb_scroll)
+            cb_type.bind("<MouseWheel>", on_cb_scroll)
+            
+            def sync_height(event, cr=c_row):
+                if cr.winfo_reqheight() != event.height or cr.winfo_height() != event.height:
+                    cr.configure(height=event.height, width=150)
+                    cr.pack_propagate(False)
+            t_row.bind("<Configure>", sync_height)
+            
+            self.text_rows.append(t_row)
+            self.cb_rows.append(c_row)
+            
+        self.mod_text_canvas.yview_moveto(0)
+        self.mod_cb_canvas.yview_moveto(0)
+
+    def execute_extraction(self):
+        import os, json
+        from backend.extractor import extract_mod_diff
+        
+        asset_val = self.cb_asset.get()
+        mod_val = self.cb_mod.get()
+        
+        if not asset_val or not mod_val or not self.asset_parts:
+            self.context.logger.log("[경고] 데이터가 제대로 로드되지 않았습니다.")
+            return
+            
+        user_mapping = {}
+        for sec_name in self.ini_sections.keys():
+            part = self.mapping_vars.get(f"{sec_name}_part")
+            type_val = self.mapping_vars.get(f"{sec_name}_type")
+            if part and type_val:
+                p = part.get()
+                t = type_val.get()
+                if p != "--" and t != "--":
+                    user_mapping[sec_name] = {"part": p, "type": t}
+                
+        if not user_mapping:
+            self.context.logger.log("[경고] 매핑된 항목이 없습니다.")
+            return
+            
+        mod_dir = os.path.join("old mod", mod_val)
+        asset_dir = os.path.join(self.context.new_dir, asset_val)
+        
+        self.context.logger.log("Mod Diff 추출을 시작합니다...")
+        import threading
+        thread = threading.Thread(target=self._execute_extraction_thread, args=(mod_dir, asset_dir, user_mapping, mod_val, asset_val))
+        thread.daemon = True
+        thread.start()
+
+    def _execute_extraction_thread(self, mod_dir, asset_dir, user_mapping, mod_val, asset_val):
+        import os, json, re
+        from backend.extractor import extract_mod_diff
+        try:
+            diff_result = extract_mod_diff(mod_dir, asset_dir, user_mapping)
+            
+            output_name = f"{mod_val}_{asset_val}_diff.json"
+            output_name = re.sub(r'[\\/*?:"<>|]', "", output_name)
+            
+            if not os.path.exists(self.context.output_dir):
+                os.makedirs(self.context.output_dir)
+                
+            out_path = os.path.join(self.context.output_dir, output_name)
+            with open(out_path, 'w', encoding='utf-8') as f:
+                pair_name = f"{mod_val} -> {asset_val}"
+                json.dump({pair_name: diff_result}, f, indent=4, ensure_ascii=False)
+                
+            self.context.logger.log(f"[완료] {output_name} 저장 완료!")
+            if os.name == 'nt':
+                os.startfile(self.context.output_dir)
+        except Exception as e:
+            import traceback
+            err_msg = traceback.format_exc()
+            self.context.logger.log(f"[에러] Mod Diff 추출 중 오류 발생:\n{err_msg}")
 
 class ScriptPage(ttk.Frame):
     def __init__(self, parent, context):

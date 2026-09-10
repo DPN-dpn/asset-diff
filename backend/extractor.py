@@ -332,3 +332,73 @@ def extract_hash_diff(old_dir, new_dir):
                         diff_result["HASH_MAPPING"][o_hash] = n_hash
 
     return diff_result
+
+def extract_mod_diff(mod_dir, asset_dir, user_mapping):
+    """
+    사용자의 수동 매핑(user_mapping) 데이터를 기반으로
+    모드 디렉토리(Old Mod)와 에셋 디렉토리(New Asset) 간의 해시 매핑(Mod Diff)을 생성합니다.
+    user_mapping 구조: { "section_name": "component_name" }
+    """
+    from .ini_parser import parse_ini_for_diff
+    
+    diff_result = {
+        "HASH_MAPPING": {},
+        "INDEX_CHANGES": {},
+        "VERTEX_GROUP_MAPPING": {},
+        "STRIDE_CHANGES": {},
+        "LAYOUT_CHANGES": {},
+        "WARNINGS": []
+    }
+    
+    ini_files = []
+    for root, _, files in os.walk(mod_dir):
+        for f in files:
+            if f.lower().endswith(".ini"):
+                base_f = f.lower()
+                if not base_f.startswith("desktop") and not base_f.startswith("disabled"):
+                    ini_files.append(os.path.join(root, f))
+                    
+    if not ini_files:
+        diff_result["WARNINGS"].append(f"모드 폴더에 .ini 파일이 없습니다: {mod_dir}")
+        return diff_result
+        
+    parsed_ini = {}
+    for ini_path in ini_files:
+        parsed_ini.update(parse_ini_for_diff(ini_path))
+    
+    asset_hash_file = os.path.join(asset_dir, "hash.json")
+    if not os.path.exists(asset_hash_file):
+        diff_result["WARNINGS"].append(f"에셋 폴더에 hash.json 파일이 없습니다: {asset_dir}")
+        return diff_result
+        
+    asset_json = load_hash_json(asset_hash_file)
+    asset_dict = {comp["component_name"]: comp for comp in asset_json}
+    
+    for sec_name, mapping_info in user_mapping.items():
+        comp_name = mapping_info.get("part")
+        hash_type = mapping_info.get("type")
+        
+        if sec_name not in parsed_ini:
+            diff_result["WARNINGS"].append(f"선택한 섹션 [{sec_name}]이 INI 파일에 없습니다.")
+            continue
+            
+        if comp_name not in asset_dict:
+            diff_result["WARNINGS"].append(f"선택한 파츠 '{comp_name}'가 에셋 정보에 없습니다.")
+            continue
+            
+        old_hash = parsed_ini[sec_name]["hash"]
+        asset_comp = asset_dict[comp_name]
+        
+        if hash_type in ["draw_vb", "position_vb", "blend_vb", "texcoord_vb", "ib"]:
+            new_hash = asset_comp.get(hash_type)
+        else:
+            new_hash = None
+            for t in asset_comp.get("texture_hashes", []):
+                if len(t) >= 3 and t[0] == hash_type:
+                    new_hash = t[2]
+                    break
+                    
+        if old_hash and new_hash and old_hash != new_hash:
+            diff_result["HASH_MAPPING"][old_hash] = new_hash
+
+    return diff_result
