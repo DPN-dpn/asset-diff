@@ -49,7 +49,7 @@ def process_buf_file(filepath, mapping):
                     data[byte_index] = int(mapping[val_str])
                     changed = True
         if changed:
-            pass # We write the whole file anyway
+            print(f"  - [버퍼] {filepath} 내부 뼈대 인덱스 수정 완료")
         f.seek(0)
         f.write(data)
 
@@ -69,12 +69,16 @@ def main():
     for ini_file in ini_files:
         print(f"\\n[+] 분석 중: {ini_file}")
         with open(ini_file, 'r', encoding='utf-8') as f:
-            content = f.read()
+            original_content = f.read()
+        
+        content = original_content
 
         # 1. 해시 글로벌 치환
         for pair_name, diffs in DIFF_DATA.items():
             for old_h, new_h in diffs.get("HASH_MAPPING", {}).items():
-                content = re.sub(rf"\\b{old_h}\\b", new_h, content)
+                content, count = re.subn(rf"\\b{old_h}\\b", new_h, content)
+                if count > 0:
+                    print(f"  - [해시 치환] {old_h} ➔ {new_h} ({count}곳)")
                 
         # 섹션별로 분리
         sections = re.split(r'(^\\[.*?\\])', content, flags=re.MULTILINE)
@@ -97,13 +101,22 @@ def main():
                         for section_key, values in changes.items():
                             if section_key in ["old_ib_hash", "new_ib_hash"]: continue
                             
-                            old_first, new_first = values["match_first_index"].split(" -> ")
-                            old_cnt, new_cnt = values["match_index_count"].split(" -> ")
+                            old_first = new_first = old_cnt = new_cnt = None
+                            if "match_first_index" in values:
+                                old_first, new_first = values["match_first_index"].split(" -> ")
+                            if "match_index_count" in values:
+                                old_cnt, new_cnt = values["match_index_count"].split(" -> ")
                             
-                            if f"match_first_index = {old_first}" in sec_body and f"match_index_count = {old_cnt}" in sec_body:
-                                sec_body = re.sub(rf"match_first_index\\s*=\\s*{old_first}", f"match_first_index = {new_first}", sec_body)
-                                sec_body = re.sub(rf"match_index_count\\s*=\\s*{old_cnt}", f"match_index_count = {new_cnt}", sec_body)
-                                sections[i+1] = sec_body
+                            if old_first and f"match_first_index = {old_first}" in sec_body:
+                                sec_body, count = re.subn(rf"match_first_index\\s*=\\s*{old_first}", f"match_first_index = {new_first}", sec_body)
+                                if count > 0:
+                                    print(f"  - [인덱스 치환] match_first_index: {old_first} ➔ {new_first}")
+                            if old_cnt and f"match_index_count = {old_cnt}" in sec_body:
+                                sec_body, count = re.subn(rf"match_index_count\\s*=\\s*{old_cnt}", f"match_index_count = {new_cnt}", sec_body)
+                                if count > 0:
+                                    print(f"  - [카운트 치환] match_index_count: {old_cnt} ➔ {new_cnt}")
+                            
+                            sections[i+1] = sec_body
 
             # 버텍스 그룹(Blend) 처리
             for part, v_map in vertex_mapping.items():
@@ -130,10 +143,14 @@ def main():
                         process_buf_file(buf_filename, mapping)
         
         # 수정된 ini 저장
-        backup_file(ini_file)
-        with open(ini_file, 'w', encoding='utf-8') as f:
-            f.write("".join(sections))
-        print(f"[+] {ini_file} 저장 완료!")
+        new_content = "".join(sections)
+        if original_content != new_content:
+            backup_file(ini_file)
+            with open(ini_file, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            print(f"[+] {ini_file} 수정 및 저장 완료!")
+        else:
+            print(f"[-] {ini_file} 변경 사항 없음.")
         
     print("\\n=== 업데이트 완료! ===")
     os.system("pause")
