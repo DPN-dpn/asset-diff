@@ -393,8 +393,19 @@ def extract_mod_diff(mod_dir, asset_dir, user_mapping):
             new_hash = asset_comp.get(hash_type)
         else:
             new_hash = None
-            for t in asset_comp.get("texture_hashes", []):
-                if len(t) >= 3 and t[0] == hash_type:
+            def get_flat_texs(t_list):
+                res = []
+                for item in t_list:
+                    if isinstance(item, list):
+                        if len(item) >= 3 and isinstance(item[0], str) and isinstance(item[2], str):
+                            res.append(item)
+                        else:
+                            res.extend(get_flat_texs(item))
+                return res
+                
+            flat_texs = get_flat_texs(asset_comp.get("texture_hashes", []))
+            for t in flat_texs:
+                if t[0] == hash_type:
                     new_hash = t[2]
                     break
                     

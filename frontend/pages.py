@@ -327,10 +327,22 @@ class ModDiffPage(ttk.Frame):
                         
                 texs = comp.get("texture_hashes")
                 if texs:
-                    for t in texs:
-                        if len(t) >= 1:
+                    def get_flat_texs(t_list):
+                        res = []
+                        for item in t_list:
+                            if isinstance(item, list):
+                                if len(item) >= 3 and isinstance(item[0], str) and isinstance(item[2], str):
+                                    res.append(item)
+                                else:
+                                    res.extend(get_flat_texs(item))
+                        return res
+                        
+                    flat_texs = get_flat_texs(texs)
+                    seen = set()
+                    for t in flat_texs:
+                        if t[0] not in seen:
+                            seen.add(t[0])
                             details.append(t[0])
-                        if len(t) >= 3:
                             self.asset_text.insert(tk.END, f"  {t[0]}: {t[2]}\n")
                             
                 self.asset_part_details[c_name] = details
