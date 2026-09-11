@@ -53,6 +53,49 @@ def parse_vb_layout(filepath):
             
     return elements
 
+def get_layout_diff(old_layout, new_layout, old_hash_str, new_hash_str, old_stride, new_stride):
+    layout_diff = {
+        "old_hash": old_hash_str,
+        "new_hash": new_hash_str,
+        "old_stride": old_stride,
+        "new_stride": new_stride,
+        "changes": [],
+        "added": [],
+        "removed": []
+    }
+    
+    old_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in old_layout}
+    new_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in new_layout}
+    
+    for key, old_e in old_dict_layout.items():
+        if key in new_dict_layout:
+            new_e = new_dict_layout[key]
+            if old_e.get('format') != new_e.get('format'):
+                layout_diff['changes'].append({
+                    "semantic": old_e.get('semantic'),
+                    "index": old_e.get('index', 0),
+                    "old_format": old_e.get('format'),
+                    "new_format": new_e.get('format'),
+                    "old_offset": old_e.get('offset'),
+                    "new_offset": new_e.get('offset'),
+                    "old_size": old_e.get('size'),
+                    "new_size": new_e.get('size'),
+                    "old_type": FORMAT_INFO.get(old_e.get('format'), {}).get('type'),
+                    "new_type": FORMAT_INFO.get(new_e.get('format'), {}).get('type'),
+                    "old_struct": FORMAT_INFO.get(old_e.get('format'), {}).get('struct'),
+                    "new_struct": FORMAT_INFO.get(new_e.get('format'), {}).get('struct')
+                })
+        else:
+            layout_diff['removed'].append(old_e)
+            
+    for key, new_e in new_dict_layout.items():
+        if key not in old_dict_layout:
+            layout_diff['added'].append(new_e)
+            
+    if layout_diff['changes'] or layout_diff['added'] or layout_diff['removed']:
+        return layout_diff
+    return None
+
 def load_hash_json(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -220,47 +263,10 @@ def extract_hash_diff(old_dir, new_dir):
                 old_hash_str = old_vb0_files[0].split('=')[-1].split('.')[0] if '=' in old_vb0_files[0] else ""
                 new_hash_str = new_vb0_files[0].split('=')[-1].split('.')[0] if '=' in new_vb0_files[0] else ""
                 
-                layout_diff = {
-                    "old_hash": old_hash_str,
-                    "new_hash": new_hash_str,
-                    "old_stride": old_stride,
-                    "new_stride": new_stride,
-                    "changes": [],
-                    "added": [],
-                    "removed": []
-                }
-                
-                # 이름(SemanticName + Index) 기준으로 매핑하여 비교
-                old_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in old_layout}
-                new_dict_layout = {f"{elem['semantic']}_{elem.get('index', 0)}": elem for elem in new_layout}
-                
-                for key, old_e in old_dict_layout.items():
-                    if key in new_dict_layout:
-                        new_e = new_dict_layout[key]
-                        if old_e.get('format') != new_e.get('format'):
-                            layout_diff['changes'].append({
-                                "semantic": old_e.get('semantic'),
-                                "index": old_e.get('index', 0),
-                                "old_format": old_e.get('format'),
-                                "new_format": new_e.get('format'),
-                                "old_offset": old_e.get('offset'),
-                                "new_offset": new_e.get('offset'),
-                                "old_size": old_e.get('size'),
-                                "new_size": new_e.get('size'),
-                                "old_type": FORMAT_INFO.get(old_e.get('format'), {}).get('type'),
-                                "new_type": FORMAT_INFO.get(new_e.get('format'), {}).get('type'),
-                                "old_struct": FORMAT_INFO.get(old_e.get('format'), {}).get('struct'),
-                                "new_struct": FORMAT_INFO.get(new_e.get('format'), {}).get('struct')
-                            })
-                    else:
-                        layout_diff['removed'].append(old_e)
-                        
-                for key, new_e in new_dict_layout.items():
-                    if key not in old_dict_layout:
-                        layout_diff['added'].append(new_e)
-                        
-                if layout_diff['changes'] or layout_diff['added'] or layout_diff['removed']:
+                layout_diff = get_layout_diff(old_layout, new_layout, old_hash_str, new_hash_str, old_stride, new_stride)
+                if layout_diff:
                     diff_result["LAYOUT_CHANGES"][comp_name] = layout_diff
+                
                 
             mapping_freq = {}
             for old_f in old_vb0_files:
@@ -362,9 +368,11 @@ def extract_mod_diff(mod_dir, asset_dir, user_mapping):
         diff_result["WARNINGS"].append(f"모드 폴더에 .ini 파일이 없습니다: {mod_dir}")
         return diff_result
         
-    parsed_ini = {}
+    parsed_ini = {"overrides": {}, "resources": {}}
     for ini_path in ini_files:
-        parsed_ini.update(parse_ini_for_diff(ini_path))
+        parsed = parse_ini_for_diff(ini_path)
+        parsed_ini["overrides"].update(parsed.get("overrides", {}))
+        parsed_ini["resources"].update(parsed.get("resources", {}))
     
     asset_hash_file = os.path.join(asset_dir, "hash.json")
     if not os.path.exists(asset_hash_file):
@@ -374,42 +382,125 @@ def extract_mod_diff(mod_dir, asset_dir, user_mapping):
     asset_json = load_hash_json(asset_hash_file)
     asset_dict = {comp["component_name"]: comp for comp in asset_json}
     
+    # 1. Group sections by component
+    comp_to_sections = {}
     for sec_name, mapping_info in user_mapping.items():
         comp_name = mapping_info.get("part")
-        hash_type = mapping_info.get("type")
+        if comp_name not in comp_to_sections:
+            comp_to_sections[comp_name] = []
+        comp_to_sections[comp_name].append(sec_name)
         
-        if sec_name not in parsed_ini:
-            diff_result["WARNINGS"].append(f"선택한 섹션 [{sec_name}]이 INI 파일에 없습니다.")
-            continue
-            
+    for comp_name, sections in comp_to_sections.items():
         if comp_name not in asset_dict:
             diff_result["WARNINGS"].append(f"선택한 파츠 '{comp_name}'가 에셋 정보에 없습니다.")
             continue
             
-        old_hash = parsed_ini[sec_name]["hash"]
         asset_comp = asset_dict[comp_name]
         
-        if hash_type in ["draw_vb", "position_vb", "blend_vb", "texcoord_vb", "ib"]:
-            new_hash = asset_comp.get(hash_type)
-        else:
-            new_hash = None
-            def get_flat_texs(t_list):
-                res = []
-                for item in t_list:
-                    if isinstance(item, list):
-                        if len(item) >= 3 and isinstance(item[0], str) and isinstance(item[2], str):
-                            res.append(item)
-                        else:
-                            res.extend(get_flat_texs(item))
-                return res
+        # Collect old indexes to map by match_first_index
+        old_indexes_info = []
+        
+        for sec_name in sections:
+            mapping_info = user_mapping[sec_name]
+            hash_type = mapping_info.get("type")
+            
+            if sec_name not in parsed_ini["overrides"]:
+                diff_result["WARNINGS"].append(f"선택한 섹션 [{sec_name}]이 INI 파일에 없습니다.")
+                continue
                 
-            flat_texs = get_flat_texs(asset_comp.get("texture_hashes", []))
-            for t in flat_texs:
-                if t[0] == hash_type:
-                    new_hash = t[2]
-                    break
+            override_data = parsed_ini["overrides"][sec_name]
+            old_hash = override_data.get("hash")
+            
+            if hash_type in ["draw_vb", "position_vb", "blend_vb", "texcoord_vb", "ib"]:
+                new_hash = asset_comp.get(hash_type)
+            else:
+                new_hash = None
+                def get_flat_texs(t_list):
+                    res = []
+                    for item in t_list:
+                        if isinstance(item, list):
+                            if len(item) >= 3 and isinstance(item[0], str) and isinstance(item[2], str):
+                                res.append(item)
+                            else:
+                                res.extend(get_flat_texs(item))
+                    return res
                     
-        if old_hash and new_hash and old_hash != new_hash:
-            diff_result["HASH_MAPPING"][old_hash] = new_hash
+                flat_texs = get_flat_texs(asset_comp.get("texture_hashes", []))
+                for t in flat_texs:
+                    if t[0] == hash_type:
+                        new_hash = t[2]
+                        break
+                        
+            if old_hash and new_hash and old_hash != new_hash:
+                diff_result["HASH_MAPPING"][old_hash] = new_hash
+                
+            # Collect index for this section
+            idx = override_data.get("match_first_index")
+            cnt = override_data.get("match_index_count", 0)
+            if idx is not None:
+                old_indexes_info.append((idx, cnt, sec_name, override_data))
+                
+            # STRIDE and LAYOUT
+            vb0_res = override_data.get("vb0")
+            if vb0_res:
+                res_data = parsed_ini["resources"].get(vb0_res, {})
+                old_stride = res_data.get("stride")
+                old_filename = res_data.get("filename")
+                
+                if old_stride and old_filename:
+                    new_vb0_files = glob.glob(os.path.join(asset_dir, f"*{comp_name}*-vb0=*.txt"))
+                    if new_vb0_files:
+                        new_stride = None
+                        with open(new_vb0_files[0], 'r', encoding='utf-8') as f:
+                            first_line = f.readline().strip()
+                            if first_line.startswith("stride:"):
+                                new_stride = int(first_line.split(":")[1].strip())
+                        
+                        if new_stride is not None and old_stride != new_stride:
+                            diff_result["STRIDE_CHANGES"][comp_name] = f"{old_stride} -> {new_stride}"
+                            
+                            if old_filename.lower().endswith(".txt"):
+                                # Search for the old txt file recursively in mod_dir
+                                found_old_txt = None
+                                for root, _, files in os.walk(mod_dir):
+                                    for f in files:
+                                        if f.lower() == old_filename.lower():
+                                            found_old_txt = os.path.join(root, f)
+                                            break
+                                    if found_old_txt: break
+                                    
+                                if found_old_txt:
+                                    old_layout = parse_vb_layout(found_old_txt)
+                                    new_layout = parse_vb_layout(new_vb0_files[0])
+                                    
+                                    old_hash_str = found_old_txt.split('=')[-1].split('.')[0] if '=' in found_old_txt else ""
+                                    new_hash_str = new_vb0_files[0].split('=')[-1].split('.')[0] if '=' in new_vb0_files[0] else ""
+                                    
+                                    layout_diff = get_layout_diff(old_layout, new_layout, old_hash_str, new_hash_str, old_stride, new_stride)
+                                    if layout_diff:
+                                        diff_result["LAYOUT_CHANGES"][comp_name] = layout_diff
+                                        
+        # Process INDEX_CHANGES
+        old_indexes_info.sort(key=lambda x: x[0]) # sort by match_first_index
+        new_indexes = asset_comp.get("object_indexes", [])
+        new_counts = asset_comp.get("object_index_counts", [])
+        classes = asset_comp.get("object_classifications", [])
+        
+        for i, (old_idx, old_cnt, sec_name, override_data) in enumerate(old_indexes_info):
+            if i < len(new_indexes):
+                new_idx = new_indexes[i]
+                new_cnt = new_counts[i] if i < len(new_counts) else 0
+                cls_name = classes[i] if i < len(classes) else f"Section_{i}"
+                
+                if old_idx != new_idx or old_cnt != new_cnt:
+                    if comp_name not in diff_result["INDEX_CHANGES"]:
+                        diff_result["INDEX_CHANGES"][comp_name] = {
+                            "old_ib_hash": override_data.get("ib") or asset_comp.get("ib"),
+                            "new_ib_hash": asset_comp.get("ib")
+                        }
+                    diff_result["INDEX_CHANGES"][comp_name][cls_name] = {
+                        "match_first_index": f"{old_idx} -> {new_idx}",
+                        "match_index_count": f"{old_cnt} -> {new_cnt}"
+                    }
 
     return diff_result

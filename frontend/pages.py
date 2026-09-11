@@ -369,7 +369,8 @@ class ModDiffPage(ttk.Frame):
             
         self.ini_sections = {}
         for f in ini_files:
-            self.ini_sections.update(parse_ini_for_diff(f))
+            parsed = parse_ini_for_diff(f)
+            self.ini_sections.update(parsed.get("overrides", {}))
             
         self.filter_mod_list()
         
